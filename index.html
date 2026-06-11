@@ -84,6 +84,14 @@ svg{width:100%; height:100%; display:block}
 .bubble.ghost .fill{fill-opacity:.22}
 .bubble.ghost{opacity:.5}
 .flagdot{fill:var(--hot); stroke:#0e1014; stroke-width:.8}
+/* 업체뷰 메트로 선택 펄스 */
+.bubble.pulse .fill{animation:pulseBub 1.1s ease-out 3}
+@keyframes pulseBub{
+  0%{stroke:#fff; stroke-width:1; fill-opacity:.82}
+  50%{stroke:#fff; stroke-width:3.5; fill-opacity:1}
+  100%{stroke:#0e1014; stroke-width:1; fill-opacity:.82}
+}
+.pulse-ring{fill:none; stroke:#fff; pointer-events:none}
 .mlabel{font-family:var(--mono); font-size:clamp(8px,.7vw,9.5px); fill:var(--ink2); text-anchor:middle; pointer-events:none}
 /* operator controls */
 #opBar{
@@ -441,6 +449,12 @@ function redrawGridMetros(){
     d=>metric!=='cy30'&&d.plan>0?R(d[metric]+d.plan):0,  // CY2030에선 plan 점선 숨김(이중계상 방지)
     d=>clsColor(d.grid),null),120);
 }
+// metric별 메타: 정렬키·주라벨·부정보
+const METRIC_META={
+  cy26:{key:'cy26',label:'CY2026',sub:d=>`CY30 ${GW(d.cy30)}`},
+  cy30:{key:'cy30',label:'CY2030',sub:d=>`UC ${NUM(d.uc)}`},
+  uc:{key:'uc',label:'건설중 UC',sub:d=>`CY30 ${GW(d.cy30)}`}
+};
 function exitGrid(){
   curGrid=null;selMetro=null;clearMetros();zoomReset();showCanbox();
   document.getElementById('metricCtrl').style.display='none';
@@ -484,15 +498,25 @@ function drawAllGhosts(){
   list.forEach(d=>d._tip=`<b>${d.metro.split(',')[0]}</b><br>Hyperscaler 가동 ${NUM(d.cy26)}MW · ${d.n_co}곳<br><span style="color:#7d828e">업체 선택 시 강조</span>`);
   drawMetros(list,d=>Math.max(d.cy26>0?2:0,RmOp(d.cy26)),()=>0,()=>'#e0a13e',ghost);
 }
+let opMetric='cy26'; // 업체뷰 버블 기준: cy26(가동) | cy30(전망)
 function selectOp(name){
   curOp=name;selMetro=null;
   document.querySelectorAll('#opBar .chip').forEach(c=>c.classList.toggle('on',c.dataset.op===name));
   const o=opIdx[name];
   const ms=o.metros.map(m=>{const xy=metroXY[m.metro];return xy?{...m,x:xy.x,y:xy.y,n_co:1,companies:[m]}:null}).filter(Boolean);
-  ms.forEach(m=>m._tip=`<b>${m.metro.split(',')[0]}</b> · ${o.co}<br>가동 ${NUM(m.cy26)} · UC ${NUM(m.uc)} · 계획 ${NUM(m.plan)}`);
-  drawMetros(ms,d=>Math.max(d.cy26>0?2.5:0,RmOp(d.cy26)),
-    d=>(d.uc+d.plan)>0?RmOp(d.cy26+d.uc+d.plan):0,()=>SEG_COLOR[o.cat],null);
+  ms.forEach(m=>m._tip=`<b>${m.metro.split(',')[0]}</b> · ${o.co}<br>가동 ${NUM(m.cy26)} · CY30 ${NUM(m.cy30)} · UC ${NUM(m.uc)}`);
+  drawOpMetros(ms,o);
   crumb();sideOpDetail(o);
+}
+function drawOpMetros(ms,o){
+  if(opMetric==='cy30'){
+    // CY2030 전망 기준: 크기=cy30, 점선 없음
+    drawMetros(ms,d=>Math.max(d.cy30>0?2.5:0,RmOp(d.cy30)),()=>0,()=>SEG_COLOR[o.cat],null);
+  }else{
+    // CY2026 가동 + 점선 확장(UC+Plan)
+    drawMetros(ms,d=>Math.max(d.cy26>0?2.5:0,RmOp(d.cy26)),
+      d=>(d.uc+d.plan)>0?RmOp(d.cy26+d.uc+d.plan):0,()=>SEG_COLOR[o.cat],null);
+  }
 }
 
 /* ═══════════ VIEW: 대시보드 (동적) ═══════════ */
@@ -616,11 +640,13 @@ function dumbbellSVG(g){
 function sideGridDetail(g){
   setAsideHidden(false);
   const iso=g.cls==='iso',mom=g.cy26>0?Math.round(g.uc/g.cy26*100):0;
-  const topM=[...g.metros].sort((a,b)=>b.cy30-a.cy30).slice(0,8);
-  const ops={};g.metros.forEach(m=>m.companies.forEach(c=>{
-    ops[c.co]=ops[c.co]||{co:c.co,cat:c.cat,cy30:0,uc:0};ops[c.co].cy30+=c.cy30;ops[c.co].uc+=c.uc}));
-  const topO=Object.values(ops).sort((a,b)=>b.cy30-a.cy30).slice(0,8);
   const isCan=g.grid==='Canada';
+  const MM=METRIC_META[metric]||METRIC_META.cy30, mk=MM.key;
+  const topM=[...g.metros].sort((a,b)=>b[mk]-a[mk]).slice(0,8);
+  const ops={};g.metros.forEach(m=>m.companies.forEach(c=>{
+    ops[c.co]=ops[c.co]||{co:c.co,cat:c.cat,cy26:0,cy30:0,uc:0};
+    ops[c.co].cy26+=c.cy26;ops[c.co].cy30+=c.cy30;ops[c.co].uc+=c.uc}));
+  const topO=Object.values(ops).sort((a,b)=>b[mk]-a[mk]).slice(0,8);
   side.innerHTML=`
     <div class="ph"><div class="t">${g.grid}</div>
       <div class="st">${GM[g.grid][1]}</div>
@@ -629,19 +655,21 @@ function sideGridDetail(g){
       ${isCan?'<div class="flag" style="color:var(--mute);border-color:var(--line2);background:none">미국 본토 지도 범위 밖 — 수치만 제공</div>':''}</div>
     ${!isCan?dumbbellSVG(g):''}
     <div class="kpis">
+      <div class="kpi"><div class="k">CY2026 가동</div><div class="v">${NUM(g.cy26)}<span class="u"> MW</span></div></div>
+      <div class="kpi grow"><div class="k">CY2030 전망</div><div class="v">${NUM(g.cy30)}<span class="u"> MW</span></div></div>
       <div class="kpi"><div class="k">건설중 UC</div><div class="v">${NUM(g.uc)}<span class="u"> MW</span></div></div>
       <div class="kpi pipe"><div class="k">파이프라인 모멘텀</div><div class="v">${mom}<span class="u">% UC/CY26</span></div></div>
     </div>
-    <div class="sh"><span>주요 메트로 · CY2030</span><span>${isCan?'':'클릭 → 상세'}</span></div>
+    <div class="sh"><span>주요 메트로 · ${MM.label}</span><span>${isCan?'':'클릭 → 상세'}</span></div>
     ${topM.map(m=>`<div class="row ${isCan?'static':''}" data-m="${m.metro}">
       <span class="dot" style="background:${clsColor(m.grid)}"></span>
       <span class="nm">${m.metro}${m.flag?' <span style="color:var(--hot)">⚑</span>':''}</span>
-      <span class="mw">${GW(m.cy30)}<br><span class="sub">UC ${NUM(m.uc)}</span></span></div>`).join('')}
-    <div class="sh"><span>주요 업체 · CY2030</span><span>MW</span></div>
+      <span class="mw">${GW(m[mk])}<br><span class="sub">${MM.sub(m)}</span></span></div>`).join('')}
+    <div class="sh"><span>주요 업체 · ${MM.label}</span><span>MW</span></div>
     ${topO.map(o=>`<div class="row static">
       <span class="dot" style="background:${SEG_COLOR[o.cat]}"></span>
       <span class="nm">${o.co}</span>
-      <span class="mw">${GW(o.cy30)}<br><span class="sub">UC ${NUM(o.uc)}</span></span></div>`).join('')}`;
+      <span class="mw">${GW(o[mk])}<br><span class="sub">${MM.sub(o)}</span></span></div>`).join('')}`;
   if(!isCan)side.querySelectorAll('.row[data-m]').forEach(r=>r.onclick=()=>{const m=metroXY[r.dataset.m];if(m)selectMetro(m)});
 }
 function selectMetro(d){
@@ -687,29 +715,61 @@ function sideOpDetail(o){
   const isHy=o.cat==='Hyperscaler';
   const exp=[...o.metros].sort((a,b)=>(b.uc+b.plan)-(a.uc+a.plan)).slice(0,12);
   const cur=[...o.metros].filter(m=>m.cy26>0).sort((a,b)=>b.cy26-a.cy26).slice(0,8);
+  const fut=[...o.metros].filter(m=>m.cy30>0).sort((a,b)=>b.cy30-a.cy30).slice(0,10);
   const maxE=Math.max(...exp.map(m=>m.uc+m.plan),1);
   const mom=o.cy26>0?Math.round(o.uc/o.cy26*100):0;
   side.innerHTML=`
     <div class="ph"><div class="t">${o.co}</div>
-      <div class="st">${o.cat} · 거점 ${o.metros.length}개 메트로</div></div>
+      <div class="st">${o.cat} · 거점 ${o.metros.length}개 메트로</div>
+      <div class="seg" style="margin-top:9px" id="opMetricSeg">
+        <button data-om="cy26" class="${opMetric==='cy26'?'on':''}">CY2026 가동</button>
+        <button data-om="cy30" class="${opMetric==='cy30'?'on':''}">CY2030 전망</button></div></div>
     <div class="kpis">
       <div class="kpi"><div class="k">CY2026 가동</div><div class="v">${GW(o.cy26)}</div></div>
       <div class="kpi grow"><div class="k">CY2030 전망</div><div class="v">${GW(o.cy30)}</div></div>
       <div class="kpi"><div class="k">건설중 UC</div><div class="v">${NUM(o.uc)}<span class="u"> MW</span></div></div>
       <div class="kpi pipe"><div class="k">모멘텀</div><div class="v">${mom}<span class="u">% UC/CY26</span></div></div>
     </div>
-    <div class="sh"><span>현재 핵심 거점 · CY2026</span><span>MW</span></div>
-    ${cur.map(m=>`<div class="row static"><span class="dot" style="background:${SEG_COLOR[o.cat]}"></span>
+    ${opMetric==='cy30'?`
+    <div class="sh"><span>CY2030 전망 거점</span><span>지도 ↔ 클릭</span></div>
+    ${fut.map(m=>`<div class="row op-m" data-m="${m.metro}"><span class="dot" style="background:${SEG_COLOR[o.cat]}"></span>
+      <span class="nm">${m.metro} <span style="color:var(--faint);font-size:9px">${m.cls==='iso'?'ISO':'non-RTO'}</span></span>
+      <span class="mw">${GW(m.cy30)}<br><span class="sub">CY26 ${NUM(m.cy26)}</span></span></div>`).join('')}
+    `:`
+    <div class="sh"><span>현재 핵심 거점 · CY2026</span><span>지도 ↔ 클릭</span></div>
+    ${cur.map(m=>`<div class="row op-m" data-m="${m.metro}"><span class="dot" style="background:${SEG_COLOR[o.cat]}"></span>
       <span class="nm">${m.metro} <span style="color:var(--faint);font-size:9px">${m.cls==='iso'?'ISO':'non-RTO'}</span></span>
       <span class="mw">${NUM(m.cy26)}</span></div>`).join('')||'<div class="empty" style="font-size:10px">CY2026 가동 거점 없음 (신규 진입)</div>'}
     <div class="sh"><span>확장 방향 · UC+계획 (2026 시점)</span><span>진한=UC</span></div>
     ${exp.filter(m=>m.uc+m.plan>0).map(m=>`
-      <div class="hb"><div class="hl"><span class="n">${m.metro}</span>
+      <div class="hb op-m" data-m="${m.metro}" style="cursor:pointer"><div class="hl"><span class="n">${m.metro}</span>
         <span class="v">${NUM(m.uc+m.plan)} <span style="color:var(--faint)">UC ${NUM(m.uc)}</span></span></div>
       <div class="tr">
         <div class="b" style="width:${(m.uc+m.plan)/maxE*100}%;background:${SEG_COLOR[o.cat]};opacity:.35"></div>
         <div class="b" style="width:${m.uc/maxE*100}%;background:${SEG_COLOR[o.cat]};margin-top:-7px"></div></div></div>`).join('')}
+    `}
     ${isHy?'<div class="note"><b>자가 운영 시설 한정.</b> 이 수치는 '+o.co+'가 직접 소유·운영하는 데이터센터만 포함하며, 콜로케이션 리스분은 제외됩니다. 계획(Plan)은 announced 미보정으로 CY2030 전망에 그대로 합산되지 않습니다.</div>':'<div class="note">계획(Plan)은 announced 미보정. CY2030 전망에는 실현 추정분만 반영됩니다.</div>'}`;
+  // 뷰 토글
+  side.querySelectorAll('#opMetricSeg button').forEach(b=>b.onclick=()=>{
+    opMetric=b.dataset.om;selectOp(o.co)});
+  // 메트로 행 → 지도 펄스+줌
+  side.querySelectorAll('.op-m').forEach(r=>{
+    r.onmouseenter=()=>pulseMetro(r.dataset.m,false);
+    r.onclick=()=>pulseMetro(r.dataset.m,true);
+  });
+}
+function pulseMetro(name,doZoom){
+  const node=gMetro.selectAll('.bubble').filter(d=>d.metro===name);
+  if(node.empty())return;
+  gMetro.selectAll('.bubble').classed('pulse',false);
+  node.classed('pulse',true);
+  setTimeout(()=>node.classed('pulse',false),3300);
+  if(doZoom){
+    const d=node.datum();
+    zoomTo(d.x-40,d.y-40,d.x+40,d.y+40,120);
+    // 줌 후 펄스 재적용
+    setTimeout(()=>{node.classed('pulse',false);void node.node().offsetWidth;node.classed('pulse',true)},680);
+  }
 }
 function setAsideHidden(h){document.body.classList.toggle('aside-hidden',h)}
 function sideAbout(){
@@ -767,7 +827,8 @@ document.querySelectorAll('#viewSeg button').forEach(b=>b.onclick=()=>{
   ({grid:enterGridView,op:enterOpView,dash:enterDashView})[b.dataset.v]()});
 document.querySelectorAll('#metricSeg button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#metricSeg button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
-  metric=b.dataset.m;if(curGrid)redrawGridMetros()});
+  metric=b.dataset.m;
+  if(curGrid){redrawGridMetros();if(!selMetro)sideGridDetail(gridIdx[curGrid])}});
 svg.on('click',()=>{if(selMetro){selMetro=null;
   gMetro.selectAll('.bubble').classed('dim',false).classed('sel',false);
   if(VIEW==='grid'&&curGrid)sideGridDetail(gridIdx[curGrid]);
