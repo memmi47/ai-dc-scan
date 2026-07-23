@@ -134,7 +134,13 @@ button { color: inherit; }
 .search-result .type { color: var(--blue-2); font: 9px var(--mono); text-transform: uppercase; }
 .search-result .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-result .meta { color: var(--muted); font: 9px var(--mono); }
-.view { display: none; height: calc(100vh - var(--header-h)); }
+/* dvh는 iPadOS/iOS Safari의 동적 툴바를 반영해 실제 보이는 높이만큼만 잡는다.
+   100vh만 쓰면 툴바가 떠 있을 때 화면 아랫부분이 그만큼 가려진다. */
+.view {
+  display: none;
+  height: calc(100vh - var(--header-h));
+  height: calc(100dvh - var(--header-h));
+}
 .view.active { display: block; }
 .workspace {
   display: grid;
@@ -769,7 +775,11 @@ button { color: inherit; }
   .brand { grid-area: brand; }
   .primary-nav { grid-area: nav; justify-self: center; }
   .global-search { grid-area: search; width: 100%; }
-  .view { height: auto; min-height: calc(100vh - 105px); }
+  .view {
+    height: auto;
+    min-height: calc(100vh - 105px);
+    min-height: calc(100dvh - 105px);
+  }
   .workspace { grid-template-columns: 1fr; height: auto; }
   .map-stage { height: 62vh; min-height: 470px; }
   .inspector { border-left: 0; border-top: 1px solid var(--line-strong); max-height: none; }
