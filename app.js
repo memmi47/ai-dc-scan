@@ -390,6 +390,9 @@
     mapProjection = setupMapBase(mapSvg, mapRoot, width, height);
     mapZoom = d3.zoom()
       .scaleExtent([1, 18])
+      // 일반 휠/트랙패드 스크롤은 페이지 스크롤로 남겨두고, 핀치·Ctrl+휠만 지도 확대로 받는다.
+      // 그렇지 않으면 좁은 화면에서 지도 위로 스크롤할 때 페이지가 아니라 지도만 움직인다.
+      .filter((event) => event.type === "wheel" ? (event.ctrlKey || event.metaKey) : !event.button)
       .on("zoom", (event) => {
         currentMapTransform = event.transform;
         mapRoot.attr("transform", event.transform);

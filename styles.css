@@ -44,7 +44,8 @@ button { color: inherit; }
   padding: 0 clamp(10px, 1.5vw, 18px);
   border-bottom: 1px solid var(--line-strong);
   background: rgba(21, 25, 32, .98);
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 30;
 }
 .brand {
