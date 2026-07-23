@@ -46,7 +46,6 @@ button { color: inherit; }
   background: rgba(21, 25, 32, .98);
   position: relative;
   z-index: 30;
-  overflow: hidden;
 }
 .brand {
   font: 800 clamp(14px, 1.7vw, 24px)/1 var(--sans);
@@ -129,7 +128,8 @@ button { color: inherit; }
   text-align: left;
   cursor: pointer;
 }
-.search-result:hover { background: var(--panel-2); }
+.search-result:hover,
+.search-result.active { background: var(--panel-2); }
 .search-result .type { color: var(--blue-2); font: 9px var(--mono); text-transform: uppercase; }
 .search-result .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-result .meta { color: var(--muted); font: 9px var(--mono); }

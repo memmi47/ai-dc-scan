@@ -211,6 +211,15 @@
     .sort((a, b) => b.capacity2030Mw - a.capacity2030Mw);
 
   const national = aggregate("USA", "United States", "country", facilities);
+
+  // 원 크기 기준(반경당 GW)을 화면·필터·연도와 무관하게 고정한다.
+  // 필터링된 부분집합으로 매번 다시 계산하면, 예를 들어 시설유형을 하이퍼스케일러로만
+  // 좁혔을 때 같은 크기 원이 다른 GW를 의미하게 되어 화면 간 비교가 불가능해진다.
+  const scalePeak = (item) => Math.max(...item.capacityByYear, pipelineTotal(item));
+  const GRID_SCALE_MAX = d3.max(gridAggregates(facilities), scalePeak) || 1;
+  const MARKET_SCALE_MAX = d3.max(markets, scalePeak) || 1;
+  const CAMPUS_SCALE_MAX = d3.max(campuses, scalePeak) || 1;
+
   const stateFeatures = topojson.feature(TOPO, TOPO.objects.states);
   const nationFeature = topojson.feature(TOPO, TOPO.objects.nation);
 
@@ -414,8 +423,7 @@
       .filter(Boolean);
     const bounds = mapDimensions(mapSvg.node());
     const compact = bounds.width < 600;
-    const max = d3.max(nodes, (item) => Math.max(capacityAt(item, LAST_YEAR), pipelineTotal(item))) || 1;
-    const radius = d3.scaleSqrt().domain([0, max]).range(compact ? [4, 34] : [5, 46]);
+    const radius = d3.scaleSqrt().domain([0, GRID_SCALE_MAX]).range(compact ? [4, 34] : [5, 46]);
     const outerRadius = (item) => Math.max(radius(capacityAt(item, LAST_YEAR)), radius(pipelineTotal(item)));
     // 라벨이 원보다 넓은 작은 권역에서 글자끼리 겹치므로, 글자 폭도 밀어내기 반경에 반영한다.
     const labelHalfWidth = (item) => item.label.length * (compact ? 2.7 : 3.3) + 5;
@@ -464,8 +472,8 @@
 
   function renderAggregateNodes() {
     const nodes = visibleNodes().map((item) => projectAggregate(item, mapProjection)).filter(Boolean);
-    const max = d3.max(nodes, (item) => capacityAt(item)) || 1;
-    const radius = d3.scaleSqrt().domain([0, max]).range([3, state.layer === "market" ? 25 : 18]);
+    const scaleMax = state.layer === "market" ? MARKET_SCALE_MAX : CAMPUS_SCALE_MAX;
+    const radius = d3.scaleSqrt().domain([0, scaleMax]).range([3, state.layer === "market" ? 25 : 18]);
     nodes.forEach((item) => {
       item.anchorX = item.x;
       item.anchorY = item.y;
@@ -980,15 +988,17 @@
     const visibleGroups = query ? filteredGroups : groups;
     const major = visibleGroups.slice(0, 10);
     const majorIds = new Set(major.map((item) => item.id));
-    const remaining = groups.filter((item) => !majorIds.has(item.id));
+    const remaining = visibleGroups.filter((item) => !majorIds.has(item.id));
     const entityOption = (item) => `<option value="${escapeHtml(item.id)}" ${item.id === state.selectedEntity ? "selected" : ""}>${escapeHtml(item.label)} · ${fmtMw(capacityAt(item))}</option>`;
     const picker = state.entityMode === "tenant"
       ? `<select class="entity-select" data-entity-select><option value="">추정 테넌트 선택…</option>${remaining.map(entityOption).join("")}</select>`
       : `<select class="entity-select" data-entity-select><option value="">+ Hyperscaler 기타</option>${remaining.filter((item) => item.dominantType === "hyperscaler").map(entityOption).join("")}</select>
          <select class="entity-select" data-entity-select><option value="">+ Colocation 기타</option>${remaining.filter((item) => item.dominantType !== "hyperscaler").map(entityOption).join("")}</select>`;
-    document.getElementById("entityList").innerHTML = `<div class="entity-picker-row">${major.map((item) => `
+    document.getElementById("entityList").innerHTML = visibleGroups.length
+      ? `<div class="entity-picker-row">${major.map((item) => `
       <button type="button" class="entity-chip ${item.dominantType} ${item.id === state.selectedEntity ? "active" : ""}" data-entity="${escapeHtml(item.id)}"><span class="entity-dot"></span>${escapeHtml(item.label)}<span class="entity-chip-value">${fmtMw(capacityAt(item))}</span></button>`).join("")}${picker}</div>
-      <div class="entity-summary"><span>${groups.length}개 업체 · ${state.year} YE 기준</span><strong>${fmtMw(groups.reduce((total, row) => total + capacityAt(row), 0))}</strong></div>`;
+      <div class="entity-summary"><span>${groups.length}개 업체 · ${state.year} YE 기준</span><strong>${fmtMw(groups.reduce((total, row) => total + capacityAt(row), 0))}</strong></div>`
+      : `<div class="empty-state compact">"${escapeHtml(query)}"에 대한 검색 결과가 없습니다.</div>`;
     document.querySelectorAll("#entityModeSeg button").forEach((button) => button.classList.toggle("active", button.dataset.mode === state.entityMode));
     document.getElementById("entityTypeSeg").classList.toggle("hidden", state.entityMode !== "operator");
     document.querySelectorAll("#entityTypeSeg button").forEach((button) => button.classList.toggle("active", button.dataset.entityType === state.entityFacilityType));
@@ -1029,9 +1039,9 @@
       .slice(0, 24)
       .map((item) => projectAggregate(item, projection))
       .filter(Boolean);
-    // 반경 기준을 마지막 연도로 고정해야 슬라이더를 밀 때 원이 실제로 커진다.
-    const max = d3.max(groups, (item) => Math.max(capacityAt(item, LAST_YEAR), pipelineTotal(item))) || 1;
-    const radius = d3.scaleSqrt().domain([0, max]).range([3, 26]);
+    // 지도의 시장 레이어와 동일한 기준(MARKET_SCALE_MAX)을 써야 지도·업체 화면을 넘나들며
+    // 원 크기를 비교할 수 있다.
+    const radius = d3.scaleSqrt().domain([0, MARKET_SCALE_MAX]).range([3, 25]);
     const color = entityColor;
     // 시장이 몰린 동부에서 라벨이 겹치므로 원+글자 폭만큼만 살짝 밀어낸다.
     const top = new Set(groups.slice(0, 10).map((item) => item.id));
@@ -1211,33 +1221,55 @@
     if (view === "dashboard") renderDashboard();
   }
 
+  let searchActiveIndex = -1;
+
+  function activateSearchResult(button) {
+    if (!button) return;
+    const results = document.getElementById("searchResults");
+    results.classList.remove("open");
+    document.getElementById("globalSearch").value = "";
+    searchActiveIndex = -1;
+    if (button.dataset.kind === "market") navigateToMarket(button.dataset.id);
+    if (button.dataset.kind === "campus") navigateToCampus(button.dataset.id);
+    if (button.dataset.kind === "operator" || button.dataset.kind === "tenant") {
+      state.entityMode = button.dataset.kind === "tenant" ? "tenant" : "operator";
+      state.entityFacilityType = "all";
+      state.selectedEntity = button.dataset.id;
+      switchView("operator");
+    }
+    if (button.dataset.kind === "grid") openGrid(button.dataset.id);
+  }
+
   function renderSearch(query) {
     const results = document.getElementById("searchResults");
     const normalized = query.trim().toLowerCase();
+    searchActiveIndex = -1;
     if (normalized.length < 2) {
       results.classList.remove("open");
       results.innerHTML = "";
       return;
     }
     const matches = [
-      ...markets.filter((item) => item.label.toLowerCase().includes(normalized)).slice(0, 5).map((item) => ({ kind: "market", id: item.id, name: item.label, meta: fmtMw(item.capacity2030Mw) })),
-      ...campuses.filter((item) => `${item.label} ${item.items[0].city} ${item.items[0].market}`.toLowerCase().includes(normalized)).slice(0, 7).map((item) => ({ kind: "campus", id: item.id, name: item.label, meta: item.items[0].market })),
+      ...Object.entries(GRID_META).filter(([id, meta]) => `${id} ${meta.label}`.toLowerCase().includes(normalized)).slice(0, 3).map(([id, meta]) => ({ kind: "grid", id, name: meta.label, meta: meta.description })),
+      ...markets.filter((item) => `${item.label} ${item.states.join(" ")}`.toLowerCase().includes(normalized)).slice(0, 5).map((item) => ({ kind: "market", id: item.id, name: item.label, meta: fmtMw(item.capacity2030Mw) })),
+      ...campuses.filter((item) => `${item.label} ${item.items[0].city} ${item.items[0].state} ${item.items[0].market}`.toLowerCase().includes(normalized)).slice(0, 7).map((item) => ({ kind: "campus", id: item.id, name: item.label, meta: item.items[0].market })),
       ...operatorGroups.filter((item) => item.label.toLowerCase().includes(normalized)).slice(0, 5).map((item) => ({ kind: "operator", id: item.id, name: item.label, meta: fmtMw(item.capacity2030Mw) })),
-    ].slice(0, 14);
+      ...tenantGroups.filter((item) => item.label.toLowerCase().includes(normalized)).slice(0, 4).map((item) => ({ kind: "tenant", id: item.id, name: item.label, meta: fmtMw(item.capacity2030Mw) })),
+    ].slice(0, 16);
     results.innerHTML = matches.length ? matches.map((item) => `<button type="button" class="search-result" data-kind="${item.kind}" data-id="${escapeHtml(item.id)}"><span class="type">${item.kind}</span><span class="name">${escapeHtml(item.name)}</span><span class="meta">${escapeHtml(item.meta)}</span></button>`).join("") : '<div class="empty-state" style="padding:14px">검색 결과가 없습니다.</div>';
     results.classList.add("open");
-    results.querySelectorAll(".search-result").forEach((button) => button.addEventListener("click", () => {
-      results.classList.remove("open");
-      document.getElementById("globalSearch").value = "";
-      if (button.dataset.kind === "market") navigateToMarket(button.dataset.id);
-      if (button.dataset.kind === "campus") navigateToCampus(button.dataset.id);
-      if (button.dataset.kind === "operator") {
-        state.entityMode = "operator";
-        state.entityFacilityType = "all";
-        state.selectedEntity = button.dataset.id;
-        switchView("operator");
-      }
-    }));
+    results.querySelectorAll(".search-result").forEach((button) => button.addEventListener("click", () => activateSearchResult(button)));
+  }
+
+  function moveSearchSelection(delta) {
+    const results = document.getElementById("searchResults");
+    const items = [...results.querySelectorAll(".search-result")];
+    if (!items.length) return;
+    items[searchActiveIndex]?.classList.remove("active");
+    searchActiveIndex = (searchActiveIndex + delta + items.length) % items.length;
+    const active = items[searchActiveIndex];
+    active.classList.add("active");
+    active.scrollIntoView({ block: "nearest" });
   }
 
   function bindControls() {
@@ -1278,7 +1310,22 @@
       renderEntityView();
     });
     document.getElementById("entitySearch").addEventListener("input", renderEntityView);
-    document.getElementById("globalSearch").addEventListener("input", (event) => renderSearch(event.target.value));
+    const globalSearch = document.getElementById("globalSearch");
+    globalSearch.addEventListener("input", (event) => renderSearch(event.target.value));
+    globalSearch.addEventListener("keydown", (event) => {
+      const results = document.getElementById("searchResults");
+      if (!results.classList.contains("open")) return;
+      if (event.key === "ArrowDown") { event.preventDefault(); moveSearchSelection(1); }
+      else if (event.key === "ArrowUp") { event.preventDefault(); moveSearchSelection(-1); }
+      else if (event.key === "Enter") {
+        event.preventDefault();
+        const items = [...results.querySelectorAll(".search-result")];
+        activateSearchResult(items[searchActiveIndex] || items[0]);
+      } else if (event.key === "Escape") {
+        results.classList.remove("open");
+        globalSearch.blur();
+      }
+    });
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".global-search")) document.getElementById("searchResults").classList.remove("open");
     });
